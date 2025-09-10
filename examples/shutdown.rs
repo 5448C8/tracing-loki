@@ -12,7 +12,10 @@ fn tracing_setup(
 ) -> Result<(tracing_loki::BackgroundTaskController, JoinHandle<()>), Box<dyn Error>> {
     let (layer, controller, task) = tracing_loki::builder()
         .label("host", "mine")?
-        .build_controller_url(Url::parse("http://127.0.0.1:3100").unwrap())?;
+        .build_controller_url(
+            Url::parse("http://127.0.0.1:3100").unwrap(),
+            reqwest::Client::builder().build()?,
+        )?;
 
     tracing_subscriber::registry()
         .with(LevelFilter::INFO)

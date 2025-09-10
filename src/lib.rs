@@ -15,7 +15,10 @@
 //!     let (layer, task) = tracing_loki::builder()
 //!         .label("host", "mine")?
 //!         .extra_field("pid", format!("{}", process::id()))?
-//!         .build_url(Url::parse("http://127.0.0.1:3100").unwrap())?;
+//!         .build_url(
+//!             Url::parse("http://127.0.0.1:3100").unwrap(),
+//!             reqwest::Client::builder().build().unwrap(),
+//!         )?;
 //!
 //!     // We need to register our layer with `tracing`.
 //!     tracing_subscriber::registry()
@@ -180,6 +183,7 @@ impl fmt::Display for ErrorInner {
 /// async fn main() -> Result<(), tracing_loki::Error> {
 ///     let (layer, task) = tracing_loki::layer(
 ///         Url::parse("http://127.0.0.1:3100").unwrap(),
+///         reqwest::Client::builder().build().unwrap(),
 ///         vec![("host".into(), "mine".into())].into_iter().collect(),
 ///         vec![].into_iter().collect(),
 ///     )?;
@@ -206,6 +210,7 @@ impl fmt::Display for ErrorInner {
 /// ```
 pub fn layer(
     loki_url: Url,
+    http_client: reqwest::Client,
     labels: HashMap<String, String>,
     extra_fields: HashMap<String, String>,
 ) -> Result<(Layer, BackgroundTask), Error> {
@@ -220,6 +225,7 @@ pub fn layer(
         loki_url
             .join("/")
             .map_err(|_| Error(ErrorI::InvalidLokiUrl))?,
+        http_client,
     )
 }
 
@@ -453,7 +459,7 @@ pub struct BackgroundTask {
 impl BackgroundTask {
     fn new(
         loki_url: Url,
-        http_headers: reqwest::header::HeaderMap,
+        http_client: reqwest::Client,
         receiver: mpsc::Receiver<Option<LokiEvent>>,
         labels: &FormattedLabels,
     ) -> Result<BackgroundTask, Error> {
@@ -464,23 +470,7 @@ impl BackgroundTask {
                 .map_err(|_| Error(ErrorI::InvalidLokiUrl))?,
             queues: LevelMap::from_fn(|level| SendQueue::new(labels.finish(level))),
             buffer: Buffer::new(),
-            http_client: reqwest::Client::builder()
-                .user_agent(concat!(
-                    env!("CARGO_PKG_NAME"),
-                    "/",
-                    env!("CARGO_PKG_VERSION")
-                ))
-                .default_headers(http_headers)
-                .redirect(reqwest::redirect::Policy::custom(|a| {
-                    let status = a.status().as_u16();
-                    if status == 302 || status == 303 {
-                        let to = a.url().clone();
-                        return a.error(BadRedirect { status, to });
-                    }
-                    reqwest::redirect::Policy::default().redirect(a)
-                }))
-                .build()
-                .expect("reqwest client builder"),
+            http_client: http_client,
             backoff_count: 0,
             backoff: None,
             quitting: false,

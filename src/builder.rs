@@ -14,15 +14,9 @@ use url::Url;
 ///
 /// See the crate's root documentation for an example.
 pub fn builder() -> Builder {
-    let mut http_headers = reqwest::header::HeaderMap::new();
-    http_headers.insert(
-        reqwest::header::CONTENT_TYPE,
-        reqwest::header::HeaderValue::from_static("application/x-snappy"),
-    );
     Builder {
         labels: FormattedLabels::new(),
         extra_fields: HashMap::new(),
-        http_headers,
     }
 }
 
@@ -34,7 +28,6 @@ pub fn builder() -> Builder {
 pub struct Builder {
     labels: FormattedLabels,
     extra_fields: HashMap<String, String>,
-    http_headers: reqwest::header::HeaderMap,
 }
 
 impl Builder {
@@ -106,43 +99,7 @@ impl Builder {
         }
         Ok(self)
     }
-    /// Set an extra HTTP header to be sent with all requests sent to Loki.
-    ///
-    /// This can be useful to set the `X-Scope-OrgID` header which Loki
-    /// processes as the tenant ID in a multi-tenant setup.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use tracing_loki::Error;
-    /// # fn main() -> Result<(), Error> {
-    /// let builder = tracing_loki::builder()
-    ///     // Set the tenant ID for Loki.
-    ///     .http_header("X-Scope-OrgID", "7662a206-fa0f-407f-abe9-261d652c750b")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn http_header<S: AsRef<str>, T: AsRef<str>>(
-        mut self,
-        key: S,
-        value: T,
-    ) -> Result<Builder, Error> {
-        let key = key.as_ref();
-        let value = value.as_ref();
-        if self
-            .http_headers
-            .insert(
-                reqwest::header::HeaderName::from_bytes(key.as_bytes())
-                    .map_err(|_| Error(ErrorI::InvalidHttpHeaderName(key.into())))?,
-                reqwest::header::HeaderValue::from_str(value)
-                    .map_err(|_| Error(ErrorI::InvalidHttpHeaderValue(key.into())))?,
-            )
-            .is_some()
-        {
-            return Err(Error(ErrorI::DuplicateHttpHeader(key.into())));
-        }
-        Ok(self)
-    }
+
     /// Build the tracing [`Layer`] and its corresponding [`BackgroundTask`].
     ///
     /// The `loki_url` is the URL of the Loki server, like
@@ -157,14 +114,18 @@ impl Builder {
     /// appending `/loki/api/v1/push`.
     ///
     /// See the crate's root documentation for an example.
-    pub fn build_url(self, loki_url: Url) -> Result<(Layer, BackgroundTask), Error> {
+    pub fn build_url(
+        self,
+        loki_url: Url,
+        http_client: reqwest::Client,
+    ) -> Result<(Layer, BackgroundTask), Error> {
         let (sender, receiver) = event_channel();
         Ok((
             Layer {
                 sender,
                 extra_fields: self.extra_fields,
             },
-            BackgroundTask::new(loki_url, self.http_headers, receiver, &self.labels)?,
+            BackgroundTask::new(loki_url, http_client, receiver, &self.labels)?,
         ))
     }
     /// Build the tracing [`Layer`], [`BackgroundTask`] and its
@@ -188,6 +149,7 @@ impl Builder {
     pub fn build_controller_url(
         self,
         loki_url: Url,
+        http_client: reqwest::Client,
     ) -> Result<(Layer, BackgroundTaskController, BackgroundTask), Error> {
         let (sender, receiver) = event_channel();
         Ok((
@@ -196,7 +158,7 @@ impl Builder {
                 extra_fields: self.extra_fields,
             },
             BackgroundTaskController { sender },
-            BackgroundTask::new(loki_url, self.http_headers, receiver, &self.labels)?,
+            BackgroundTask::new(loki_url, http_client, receiver, &self.labels)?,
         ))
     }
 }

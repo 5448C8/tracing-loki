@@ -9,9 +9,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use url::Url;
 
 fn tracing_setup() -> Result<(), Box<dyn Error>> {
-    let (layer, task) = tracing_loki::builder()
-        .label("host", "mine")?
-        .build_url(Url::parse("http://127.0.0.1:3100").unwrap())?;
+    let (layer, task) = tracing_loki::builder().label("host", "mine")?.build_url(
+        Url::parse("http://127.0.0.1:3100").unwrap(),
+        reqwest::Client::builder().build()?,
+    )?;
 
     tracing_subscriber::registry()
         .with(LevelFilter::INFO)
